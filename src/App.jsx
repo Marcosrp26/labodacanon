@@ -187,7 +187,7 @@ export default function App() {
                     name="nombre"
                     value={form.nombre}
                     onChange={handleChange}
-                    placeholder="Ej. Ana García Pérez"
+                    placeholder="Ej.: Ana García Pérez"
                     required
                   />
                 </label>
