@@ -263,7 +263,7 @@ export default function App() {
                       checked={form.bus === "ida_vuelta"}
                       onChange={handleChange}
                     />
-                    Para ida y vuelta
+                    Para la ida y la vuelta
                   </label>
                 </fieldset>
 
@@ -274,7 +274,7 @@ export default function App() {
                     value={form.alergias}
                     onChange={handleChange}
                     rows="4"
-                    placeholder="Ej. Vegetariano, Sin gluten, frutos secos, lactosa..."
+                    placeholder="Ej.: dieta vegetariana, alergia a los frutos secos, intolerancia a la lactosa..."
                   />
                 </label>
 
