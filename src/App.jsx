@@ -274,7 +274,7 @@ export default function App() {
                     value={form.alergias}
                     onChange={handleChange}
                     rows="4"
-                    placeholder="Ej.: dieta vegetariana, alergia a los frutos secos, intolerancia a la lactosa..."
+                    placeholder="Ej.: Dieta vegetariana, alergia a los frutos secos, intolerancia a la lactosa..."
                   />
                 </label>
 
