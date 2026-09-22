@@ -26,9 +26,22 @@ export default function App() {
   const [form, setForm] = useState(initialForm);
   const [status, setStatus] = useState("idle");
   const [message, setMessage] = useState("");
+  const isAttending = form.asiste === "si";
 
   const handleChange = (event) => {
     const { name, value, type, checked } = event.target;
+
+    if (name === "asiste" && value === "no") {
+      setForm((prev) => ({
+        ...prev,
+        asiste: value,
+        bus: "no",
+        alergias: "",
+        aceptaPrivacidad: false,
+      }));
+      return;
+    }
+
     setForm((prev) => ({
       ...prev,
       [name]: type === "checkbox" ? checked : value,
@@ -42,10 +55,10 @@ export default function App() {
 
     const { error } = await supabase.from("invitados").insert({
       nombre: form.nombre.trim(),
-      asiste: form.asiste === "si",
-      bus: form.bus,
-      alergias: form.alergias.trim(),
-      acepta_privacidad: true,
+      asiste: isAttending,
+      bus: isAttending ? form.bus : "no",
+      alergias: isAttending ? form.alergias.trim() : "",
+      acepta_privacidad: isAttending,
     });
 
     if (error) {
@@ -58,7 +71,11 @@ export default function App() {
     }
 
     setStatus("success");
-    setMessage("Tu respuesta se ha guardado correctamente.");
+    setMessage(
+      isAttending
+        ? "Tu respuesta se ha guardado correctamente."
+        : "Tu respuesta se ha guardado correctamente. Te echaremos mucho de menos."
+    );
   };
 
   if (page === "photos") {
@@ -155,7 +172,20 @@ export default function App() {
                 </span>
                 <p className="eyebrow">Confirmación recibida</p>
                 <h2 id="rsvp-title">Gracias, {form.nombre || "invitado/a"}</h2>
-                <p>{message} Nos hace muchísima ilusión contar contigo.</p>
+                <p>
+                  {message}{" "}
+                  {isAttending && "Nos hace muchísima ilusión contar contigo."}
+                </p>
+                {!isAttending && (
+                  <div className="farewell-video">
+                    <iframe
+                      src="https://www.youtube.com/embed/bl_Jy7Q7l7s"
+                      title="Vídeo triste de despedida"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                      allowFullScreen
+                    />
+                  </div>
+                )}
                 <button
                   className="secondary-button"
                   onClick={() => {
@@ -216,7 +246,10 @@ export default function App() {
                   </label>
                 </fieldset>
 
-                <fieldset className="bus-group">
+                <fieldset
+                  className={`bus-group ${!isAttending ? "disabled-group" : ""}`}
+                  disabled={!isAttending}
+                >
                   <legend>
                     <Bus aria-hidden="true" />
                     ¿Necesitas bus?
@@ -267,24 +300,26 @@ export default function App() {
                   </label>
                 </fieldset>
 
-                <label className="field">
+                <label className={`field ${!isAttending ? "disabled-field" : ""}`}>
                   <span>Alergias, intolerancias o dietas especiales</span>
                   <textarea
                     name="alergias"
                     value={form.alergias}
                     onChange={handleChange}
+                    disabled={!isAttending}
                     rows="4"
                     placeholder="Ej.: Dieta vegetariana, alergia a los frutos secos, intolerancia a la lactosa..."
                   />
                 </label>
 
-                <label className="privacy-field">
+                <label className={`privacy-field ${!isAttending ? "disabled-field" : ""}`}>
                   <input
                     type="checkbox"
                     name="aceptaPrivacidad"
                     checked={form.aceptaPrivacidad}
                     onChange={handleChange}
-                    required
+                    disabled={!isAttending}
+                    required={isAttending}
                   />
                   <span>
                     Acepto que estos datos se usen únicamente para gestionar la
