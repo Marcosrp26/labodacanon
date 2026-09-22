@@ -16,7 +16,7 @@ import "./App.css";
 const initialForm = {
   nombre: "",
   asiste: "si",
-  necesitaBus: false,
+  bus: "no",
   alergias: "",
   aceptaPrivacidad: false,
 };
@@ -43,7 +43,7 @@ export default function App() {
     const { error } = await supabase.from("invitados").insert({
       nombre: form.nombre.trim(),
       asiste: form.asiste === "si",
-      necesita_bus: form.necesitaBus,
+      bus: form.bus,
       alergias: form.alergias.trim(),
       acepta_privacidad: true,
     });
@@ -121,11 +121,17 @@ export default function App() {
                 <span>Fecha</span>
                 <strong>Sábado, 12 de diciembre</strong>
               </article>
-              <article>
+              <a
+                className="event-detail-link"
+                href="https://maps.app.goo.gl/tPpQBQbfoTQG6GW79"
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Abrir ubicación de Llagar El Trole en Google Maps"
+              >
                 <MapPin aria-hidden="true" />
                 <span>Lugar</span>
                 <strong>Llagar El Trole</strong>
-              </article>
+              </a>
             </div>
 
             <button className="photos-link" onClick={() => setPage("photos")}>
@@ -210,29 +216,65 @@ export default function App() {
                   </label>
                 </fieldset>
 
-                <label className="option-card">
-                  <input
-                    type="checkbox"
-                    name="necesitaBus"
-                    checked={form.necesitaBus}
-                    onChange={handleChange}
-                  />
-                  <span>
-                    <strong>
-                      <Bus aria-hidden="true" /> Necesito bus
-                    </strong>
-                    Marca esta opción si te interesa el transporte organizado.
-                  </span>
-                </label>
+                <fieldset className="bus-group">
+                  <legend>
+                    <Bus aria-hidden="true" />
+                    ¿Necesitas bus?
+                  </legend>
+
+                  <label className={form.bus === "no" ? "selected" : ""}>
+                    <input
+                      type="radio"
+                      name="bus"
+                      value="no"
+                      checked={form.bus === "no"}
+                      onChange={handleChange}
+                    />
+                    No necesito bus
+                  </label>
+
+                  <label className={form.bus === "ida" ? "selected" : ""}>
+                    <input
+                      type="radio"
+                      name="bus"
+                      value="ida"
+                      checked={form.bus === "ida"}
+                      onChange={handleChange}
+                    />
+                    Solo para la ida
+                  </label>
+
+                  <label className={form.bus === "vuelta" ? "selected" : ""}>
+                    <input
+                      type="radio"
+                      name="bus"
+                      value="vuelta"
+                      checked={form.bus === "vuelta"}
+                      onChange={handleChange}
+                    />
+                    Solo para la vuelta
+                  </label>
+
+                  <label className={form.bus === "ida_vuelta" ? "selected" : ""}>
+                    <input
+                      type="radio"
+                      name="bus"
+                      value="ida_vuelta"
+                      checked={form.bus === "ida_vuelta"}
+                      onChange={handleChange}
+                    />
+                    Para ida y vuelta
+                  </label>
+                </fieldset>
 
                 <label className="field">
-                  <span>Alergias o intolerancias</span>
+                  <span>Alergias, intolerancias o dietas especiales</span>
                   <textarea
                     name="alergias"
                     value={form.alergias}
                     onChange={handleChange}
                     rows="4"
-                    placeholder="Ej. Sin gluten, frutos secos, lactosa..."
+                    placeholder="Ej. Vegetariano, Sin gluten, frutos secos, lactosa..."
                   />
                 </label>
 
