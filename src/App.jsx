@@ -1,10 +1,12 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Bus,
   CalendarDays,
   Camera,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Heart,
   MapPin,
   Send,
@@ -21,12 +23,242 @@ const initialForm = {
   aceptaPrivacidad: false,
 };
 
+const initialPhotoForm = {
+  file: null,
+  authorName: "",
+  caption: "",
+};
+
+const acceptedImageTypes = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/heic",
+  "image/heif",
+];
+const acceptedImageExtensions = [".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"];
+const maxPhotoSize = 5 * 1024 * 1024;
+const photosPerPage = 6;
+const albumPassword = "pablomotos";
+
+const isAcceptedImage = (file) =>
+  acceptedImageTypes.includes(file.type) ||
+  acceptedImageExtensions.some((extension) =>
+    file.name.toLowerCase().endsWith(extension)
+  );
+
+const sanitizeFileName = (fileName) =>
+  fileName
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9._-]/g, "-")
+    .replace(/-+/g, "-");
+
+const compressImageBeforeUpload = (file) =>
+  new Promise((resolve, reject) => {
+    const image = new Image();
+    const objectUrl = URL.createObjectURL(file);
+
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+
+      const maxWidth = 1600;
+      const scale = Math.min(1, maxWidth / image.width);
+      const width = Math.round(image.width * scale);
+      const height = Math.round(image.height * scale);
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
+
+      if (!context) {
+        reject(new Error("No se ha podido preparar la imagen."));
+        return;
+      }
+
+      canvas.width = width;
+      canvas.height = height;
+      context.fillStyle = "#fbfff5";
+      context.fillRect(0, 0, width, height);
+      context.drawImage(image, 0, 0, width, height);
+
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            reject(new Error("No se ha podido comprimir la imagen."));
+            return;
+          }
+
+          const compressedName = `${file.name.replace(/\.[^.]+$/, "")}.jpg`;
+          resolve(new File([blob], compressedName, { type: "image/jpeg" }));
+        },
+        "image/jpeg",
+        0.8
+      );
+    };
+
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(
+        new Error(
+          file.type === "image/heic" || file.type === "image/heif"
+            ? "No hemos podido convertir esta foto de iPhone. Prueba a compartirla como JPG o cambia la cámara a 'Más compatible'."
+            : "No se ha podido leer la imagen seleccionada."
+        )
+      );
+    };
+
+    image.src = objectUrl;
+  });
+
 export default function App() {
   const [page, setPage] = useState("home");
   const [form, setForm] = useState(initialForm);
   const [status, setStatus] = useState("idle");
   const [message, setMessage] = useState("");
+  const [photos, setPhotos] = useState([]);
+  const [photoForm, setPhotoForm] = useState(initialPhotoForm);
+  const [photoStatus, setPhotoStatus] = useState("idle");
+  const [photoMessage, setPhotoMessage] = useState("");
+  const [currentPhotoPage, setCurrentPhotoPage] = useState(1);
+  const [albumAccessGranted, setAlbumAccessGranted] = useState(false);
+  const [albumPasswordInput, setAlbumPasswordInput] = useState("");
+  const [albumAccessError, setAlbumAccessError] = useState("");
+  const galleryFileInputRef = useRef(null);
+  const cameraFileInputRef = useRef(null);
   const isAttending = form.asiste === "si";
+  const totalPhotoPages = Math.max(1, Math.ceil(photos.length / photosPerPage));
+  const visiblePhotos = photos.slice(
+    (currentPhotoPage - 1) * photosPerPage,
+    currentPhotoPage * photosPerPage
+  );
+  const leftPagePhotos = visiblePhotos.slice(0, 3);
+  const rightPagePhotos = visiblePhotos.slice(3, 6);
+  const showAlbumPagination = photos.length > photosPerPage;
+
+  const loadPhotos = async () => {
+    setPhotoStatus("loading-gallery");
+    setPhotoMessage("");
+
+    const { data, error } = await supabase
+      .from("fotos_boda")
+      .select("id, image_url, file_path, caption, author_name, created_at")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Error cargando fotos:", error);
+      setPhotoStatus("error");
+      setPhotoMessage(
+        "No hemos podido cargar el álbum. Inténtalo de nuevo en unos segundos."
+      );
+      return;
+    }
+
+    setPhotos(data ?? []);
+    setCurrentPhotoPage(1);
+    setPhotoStatus("idle");
+  };
+
+  useEffect(() => {
+    if (page === "photos" && albumAccessGranted) {
+      loadPhotos();
+    }
+  }, [page, albumAccessGranted]);
+
+  const handleAlbumAccess = (event) => {
+    event.preventDefault();
+
+    if (albumPasswordInput.trim() !== albumPassword) {
+      setAlbumAccessError("Contraseña incorrecta. El álbum permanecerá cerrado hasta el día de la boda.");
+      return;
+    }
+
+    setAlbumAccessGranted(true);
+    setAlbumAccessError("");
+    setAlbumPasswordInput("");
+  };
+
+  const handlePhotoChange = (event) => {
+    const { name, value, files } = event.target;
+    setPhotoForm((prev) => ({
+      ...prev,
+      [name]: files ? files[0] ?? null : value,
+    }));
+    if (files) {
+      setPhotoMessage("");
+    }
+  };
+
+  const handlePhotoUpload = async (event) => {
+    event.preventDefault();
+    setPhotoStatus("uploading");
+    setPhotoMessage("");
+
+    try {
+      const file = photoForm.file;
+
+      if (!file) {
+        throw new Error("Selecciona una foto antes de subirla.");
+      }
+
+      if (!isAcceptedImage(file)) {
+        throw new Error("La foto debe ser JPG, PNG, WebP, HEIC o HEIF.");
+      }
+
+      if (file.size > maxPhotoSize) {
+        throw new Error("La foto no puede superar los 5 MB.");
+      }
+
+      const compressedFile = await compressImageBeforeUpload(file);
+
+      if (compressedFile.size > maxPhotoSize) {
+        throw new Error("La foto sigue siendo demasiado grande tras comprimirla.");
+      }
+
+      const filePath = `${Date.now()}-${sanitizeFileName(compressedFile.name)}`;
+      const { error: uploadError } = await supabase.storage
+        .from("wedding-photos")
+        .upload(filePath, compressedFile, {
+          contentType: compressedFile.type,
+          upsert: false,
+        });
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+      const { data: publicData } = supabase.storage
+        .from("wedding-photos")
+        .getPublicUrl(filePath);
+
+      const { error: insertError } = await supabase.from("fotos_boda").insert({
+        image_url: publicData.publicUrl,
+        file_path: filePath,
+        caption: photoForm.caption.trim(),
+        author_name: photoForm.authorName.trim(),
+      });
+
+      if (insertError) {
+        throw insertError;
+      }
+
+      setPhotoForm(initialPhotoForm);
+      if (galleryFileInputRef.current) {
+        galleryFileInputRef.current.value = "";
+      }
+      if (cameraFileInputRef.current) {
+        cameraFileInputRef.current.value = "";
+      }
+      await loadPhotos();
+      setPhotoStatus("success");
+      setPhotoMessage("Recuerdo subido. Gracias por sumar otro momento al álbum.");
+    } catch (error) {
+      console.error("Error subiendo foto:", error);
+      setPhotoStatus("error");
+      setPhotoMessage(
+        error.message || "No hemos podido subir la foto. Inténtalo de nuevo."
+      );
+    }
+  };
 
   const handleChange = (event) => {
     const { name, value, type, checked } = event.target;
@@ -79,27 +311,313 @@ export default function App() {
   };
 
   if (page === "photos") {
+    if (!albumAccessGranted) {
+      return (
+        <main className="wedding-page">
+          <section className="coming-soon-section">
+            <motion.div
+              initial={{ opacity: 0, y: 18 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.55 }}
+              className="coming-soon-card album-lock-card"
+            >
+              <span className="icon-bubble">
+                <Camera aria-hidden="true" />
+              </span>
+              <p className="eyebrow">Álbum cerrado</p>
+              <h1>Fotos de la boda</h1>
+              <p>
+                Este álbum permanecerá cerrado hasta el día de la boda. Cuando
+                llegue el momento, podréis subir y ver todos los recuerdos.
+              </p>
+
+              <form className="album-lock-form" onSubmit={handleAlbumAccess}>
+                <label className="field">
+                  <span>Contraseña de acceso</span>
+                  <input
+                    type="password"
+                    value={albumPasswordInput}
+                    onChange={(event) => {
+                      setAlbumPasswordInput(event.target.value);
+                      setAlbumAccessError("");
+                    }}
+                    placeholder="Introduce la contraseña"
+                  />
+                </label>
+
+                {albumAccessError && (
+                  <p className="error-message" role="alert">
+                    {albumAccessError}
+                  </p>
+                )}
+
+                <button className="submit-button" type="submit">
+                  Entrar al álbum
+                </button>
+              </form>
+
+              <button className="secondary-button" onClick={() => setPage("home")}>
+                Volver a la invitación
+              </button>
+            </motion.div>
+          </section>
+        </main>
+      );
+    }
+
     return (
       <main className="wedding-page">
-        <section className="coming-soon-section">
+        <section className="photo-album-section">
+          <div className="glow glow-rose" />
+          <div className="glow glow-gold" />
+
           <motion.div
             initial={{ opacity: 0, y: 18 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.55 }}
-            className="coming-soon-card"
+            className="album-shell"
           >
-            <span className="icon-bubble">
-              <Camera aria-hidden="true" />
-            </span>
-            <p className="eyebrow">Galería</p>
-            <h1>Fotos de la boda</h1>
-            <p>
-              Muy pronto prepararemos aquí un rincón para revivir los recuerdos
-              más bonitos del día. De momento, la sección queda reservada.
-            </p>
-            <button className="secondary-button" onClick={() => setPage("home")}>
-              Volver a la invitación
-            </button>
+            <header className="album-header">
+              <div>
+                <span className="album-stamp">
+                  <Camera aria-hidden="true" />
+                  Álbum de viaje
+                </span>
+                <p className="eyebrow">Fotos de la boda</p>
+                <h1>Sube tu recuerdo de este día</h1>
+                <p>
+                  Ayúdanos a crear un álbum con los momentos vistos desde
+                  vuestros ojos. Cada foto será una parada más en este viaje.
+                </p>
+              </div>
+
+              <button className="secondary-button" onClick={() => setPage("home")}>
+                Volver a la invitación
+              </button>
+            </header>
+
+            <div className="album-layout">
+              <section className="upload-card" aria-labelledby="upload-title">
+                <div className="upload-card-heading">
+                  <Sparkles aria-hidden="true" />
+                  <div>
+                    <p className="eyebrow">Nuevo recuerdo</p>
+                    <h2 id="upload-title">Añade una foto</h2>
+                  </div>
+                </div>
+
+                <form className="photo-upload-form" onSubmit={handlePhotoUpload}>
+                  <div className="photo-picker" aria-label="Seleccionar foto">
+                    <span>Foto</span>
+                    <input
+                      ref={galleryFileInputRef}
+                      className="visually-hidden-file"
+                      type="file"
+                      name="file"
+                      accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+                      onChange={handlePhotoChange}
+                    />
+                    <input
+                      ref={cameraFileInputRef}
+                      className="visually-hidden-file"
+                      type="file"
+                      name="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={handlePhotoChange}
+                    />
+                    <div className="photo-picker-actions">
+                      <button
+                        className="photo-picker-button"
+                        type="button"
+                        onClick={() => galleryFileInputRef.current?.click()}
+                      >
+                        <Camera aria-hidden="true" />
+                        Elegir de la galería
+                      </button>
+                      <button
+                        className="photo-picker-button"
+                        type="button"
+                        onClick={() => cameraFileInputRef.current?.click()}
+                      >
+                        <Camera aria-hidden="true" />
+                        Hacer una foto
+                      </button>
+                    </div>
+                    <p>
+                      {photoForm.file
+                        ? `Seleccionada: ${photoForm.file.name}`
+                        : "Puedes elegir una imagen guardada o abrir la cámara del móvil."}
+                    </p>
+                  </div>
+
+                  <label className="field">
+                    <span>Tu nombre</span>
+                    <input
+                      name="authorName"
+                      value={photoForm.authorName}
+                      onChange={handlePhotoChange}
+                      placeholder="Ej.: Ana"
+                    />
+                  </label>
+
+                  <label className="field">
+                    <span>Pie de foto</span>
+                    <textarea
+                      name="caption"
+                      value={photoForm.caption}
+                      onChange={handlePhotoChange}
+                      rows="3"
+                      placeholder="Ej.: Primera parada del viaje de Sara y Enol..."
+                    />
+                  </label>
+
+                  {photoMessage && photoStatus === "error" && (
+                    <p className="error-message" role="alert">
+                      {photoMessage}
+                    </p>
+                  )}
+
+                  {photoMessage && photoStatus === "success" && (
+                    <p className="photo-success-message">{photoMessage}</p>
+                  )}
+
+                  <button
+                    className="submit-button"
+                    type="submit"
+                    disabled={photoStatus === "uploading"}
+                  >
+                    {photoStatus === "uploading" ? "Subiendo recuerdo..." : "Subir foto"}
+                    <Send aria-hidden="true" />
+                  </button>
+
+                  <p className="photo-help-text">
+                    Formatos admitidos: JPG, PNG, WebP, HEIC o HEIF. Tamaño máximo: 5 MB.
+                  </p>
+                </form>
+              </section>
+
+              <section className="album-board" aria-live="polite">
+                <div className="album-board-heading">
+                  <div>
+                    <p className="eyebrow">Recuerdos compartidos</p>
+                    <h2>Pasaporte de momentos</h2>
+                  </div>
+                  <span>{photos.length} fotos</span>
+                </div>
+
+                {photoStatus === "loading-gallery" && (
+                  <p className="empty-album-state">Cargando recuerdos...</p>
+                )}
+
+                {photoStatus !== "loading-gallery" && photos.length === 0 && (
+                  <div className="empty-album-state">
+                    <Camera aria-hidden="true" />
+                    <p>
+                      Aún no hay recuerdos subidos. Sé la primera persona en
+                      añadir uno.
+                    </p>
+                  </div>
+                )}
+
+                {visiblePhotos.length > 0 && (
+                  <div className="album-book-wrap">
+                    {showAlbumPagination && (
+                      <button
+                        className="album-nav-button album-nav-prev"
+                        type="button"
+                        disabled={currentPhotoPage === 1}
+                        onClick={() =>
+                          setCurrentPhotoPage((prev) => Math.max(1, prev - 1))
+                        }
+                        aria-label="Página anterior"
+                      >
+                        <ChevronLeft aria-hidden="true" />
+                      </button>
+                    )}
+
+                    <div className="album-book">
+                      {[leftPagePhotos, rightPagePhotos].map((pagePhotos, pageIndex) => (
+                        <div className="album-page" key={pageIndex === 0 ? "left" : "right"}>
+                          {pagePhotos.map((photo, index) => {
+                            const author = photo.author_name?.trim() || "Invitado/a";
+                            const caption = photo.caption?.trim();
+                            const globalIndex = pageIndex * 3 + index;
+                            const altText = caption
+                              ? `${caption}. Foto subida por ${author}`
+                              : `Foto de la boda subida por ${author}`;
+
+                            return (
+                              <article
+                                className="polaroid-card"
+                                key={photo.id ?? photo.file_path}
+                              >
+                                <img
+                                  className="polaroid-image"
+                                  src={photo.image_url}
+                                  alt={altText}
+                                  loading={globalIndex < 2 ? "eager" : "lazy"}
+                                />
+                                <div className="polaroid-caption">
+                                  <p>{caption || "Un recuerdo sin palabras."}</p>
+                                  <span>Por {author}</span>
+                                </div>
+                              </article>
+                            );
+                          })}
+                        </div>
+                      ))}
+                    </div>
+
+                    {showAlbumPagination && (
+                      <button
+                        className="album-nav-button album-nav-next"
+                        type="button"
+                        disabled={currentPhotoPage === totalPhotoPages}
+                        onClick={() =>
+                          setCurrentPhotoPage((prev) =>
+                            Math.min(totalPhotoPages, prev + 1)
+                          )
+                        }
+                        aria-label="Página siguiente"
+                      >
+                        <ChevronRight aria-hidden="true" />
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {showAlbumPagination && (
+                  <nav className="album-pagination" aria-label="Paginación del álbum">
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      disabled={currentPhotoPage === 1}
+                      onClick={() =>
+                        setCurrentPhotoPage((prev) => Math.max(1, prev - 1))
+                      }
+                    >
+                      Página anterior
+                    </button>
+                    <span>
+                      Página {currentPhotoPage} de {totalPhotoPages}
+                    </span>
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      disabled={currentPhotoPage === totalPhotoPages}
+                      onClick={() =>
+                        setCurrentPhotoPage((prev) =>
+                          Math.min(totalPhotoPages, prev + 1)
+                        )
+                      }
+                    >
+                      Página siguiente
+                    </button>
+                  </nav>
+                )}
+              </section>
+            </div>
           </motion.div>
         </section>
       </main>
@@ -154,7 +672,7 @@ export default function App() {
             <button className="photos-link" onClick={() => setPage("photos")}>
               <Camera aria-hidden="true" />
               Fotos de la boda
-              <span>Próximamente</span>
+              <span>Álbum</span>
             </button>
           </motion.section>
 
